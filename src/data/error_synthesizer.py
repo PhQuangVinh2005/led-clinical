@@ -218,9 +218,9 @@ class ClinicalErrorSynthesizer:
         if not substitute:
             return summary, None
 
-        # Replace first occurrence (case-insensitive)
-        pattern = re.compile(re.escape(target_drug), re.IGNORECASE)
-        corrupted = pattern.sub(substitute, summary, count=1)
+        # Use a lambda for the replacement to treat 'substitute' as a literal string.
+        # This prevents re.sub from interpreting backslashes as escape sequences.
+        corrupted = pattern.sub(lambda _: substitute, summary, count=1)
 
         return corrupted, {
             'type': 'MED_NAME',
@@ -389,9 +389,9 @@ class ClinicalErrorSynthesizer:
                                if p.lower() != proc.lower() and len(p) > 5]
                 if other_procs:
                     wrong_proc = self.rng.choice(other_procs)
-                    # Case-insensitive replace, first occurrence only
+                    # Use a lambda for literal substitution to avoid re.sub escape errors
                     pattern = re.compile(re.escape(proc), re.IGNORECASE)
-                    corrupted = pattern.sub(wrong_proc, summary, count=1)
+                    corrupted = pattern.sub(lambda _: wrong_proc, summary, count=1)
                     if corrupted != summary:
                         return corrupted, {
                             'type': 'PROCEDURE',
