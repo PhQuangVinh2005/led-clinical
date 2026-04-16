@@ -410,6 +410,6 @@ class ClinicalErrorSynthesizer:
                 proc_text = match.group(1)
                 for proc in re.split(r',|\band\b|with', proc_text):
                     proc = proc.strip().strip('_').strip()
-                    if len(proc) > 5 and not proc.isdigit():
+                    if len(proc) > 2 and not proc.isdigit():
                         procedures.append(proc)
         return procedures
