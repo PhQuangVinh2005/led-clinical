@@ -1,0 +1,13 @@
+torch
+transformers>=4.30
+datasets
+evaluate
+rouge-score
+pyarrow
+pyyaml
+tqdm
+accelerate
+sentencepiece
+pytest
+pytest-mock
+

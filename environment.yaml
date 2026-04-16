@@ -1,0 +1,19 @@
+name: bart
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - transformers>=4.30
+    - datasets
+    - evaluate
+    - rouge-score
+    - pyarrow
+    - pyyaml
+    - tqdm
+    - accelerate
+    - sentencepiece
+    - pytest
+    - pytest-mock

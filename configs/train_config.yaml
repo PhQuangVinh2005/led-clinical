@@ -1,0 +1,36 @@
+# LED Clinical Factual Error Correction — Training Config
+model_name: "allenai/led-base-16384"
+output_dir: "outputs/led-corrector-v1"
+
+# Data
+data_dir: "data/processed"
+max_input_length: 8192
+max_target_length: 2048
+corruption_rate: 0.3
+
+# Training
+num_train_epochs: 10
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 3.0e-5
+warmup_ratio: 0.1
+weight_decay: 0.01
+fp16: true
+gradient_checkpointing: true
+
+# Eval & Saving
+eval_strategy: "steps"
+eval_steps: 2000
+save_strategy: "steps"
+save_steps: 2000
+save_total_limit: 5
+load_best_model_at_end: true
+metric_for_best_model: "eval_loss"
+greater_is_better: false
+
+# Logging
+logging_steps: 100
+report_to: "none"
+
+seed: 42
