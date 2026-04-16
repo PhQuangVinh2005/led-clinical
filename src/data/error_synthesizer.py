@@ -1,12 +1,13 @@
 """
 Clinical Error Synthesizer — Rule-based synthetic error generation.
 
-Generates 5 types of clinical factual errors for training the LED corrector:
-1. Medication Name Swap (MED_NAME)
-2. Dosage Corruption (MED_DOSE)
-3. Temporal/POD Corruption (TEMPORAL)
-4. Negation Insertion/Removal (NEGATION)
-5. Procedure Swap (PROCEDURE)
+Generates 6 types of clinical factual errors for training the LED corrector:
+1. Medication Name Swap   (MED_NAME)
+2. Dosage Corruption      (MED_DOSE)
+3. Temporal/POD Corruption(TEMPORAL)
+4. Negation Insert/Remove (NEGATION)
+5. Procedure Swap         (PROCEDURE)
+6. Lab Value Corruption   (LAB_VALUE)
 """
 
 import random
@@ -25,6 +26,25 @@ DOSAGE_PATTERN = re.compile(
     r'(\d+\.?\d*)\s*(mg|mcg|mL|units?|g|meq|mmol)\b',
     re.IGNORECASE
 )
+
+# ── Lab value patterns ──
+# Deliberately distinct from DOSAGE_PATTERN: lab results use different units.
+# Ordered from most-specific to least-specific to avoid partial overlaps.
+LAB_PATTERNS = [
+    # Chemistry / metabolic panel  (e.g. Na 138 mEq/L, glucose 105 mg/dL)
+    (re.compile(r'(\d+\.?\d*)\s*(mg/dL|g/dL|mmol/L|mEq/L|IU/L|U/L|ng/mL|pg/mL|µg/dL|ug/dL)\b',
+                re.IGNORECASE), 'chemistry'),
+    # CBC counts  (e.g. WBC 8.5 K/uL, platelets 220 ×10^3/uL)
+    (re.compile(r'(\d+\.?\d*)\s*(K/uL|K/µL|×10\^3/uL|×10\^9/L|cells/uL|/µL|/uL)\b',
+                re.IGNORECASE), 'cbc'),
+    # Percentage: only matches when preceded by a known lab keyword on the same line
+    # e.g. "EF 45%", "O2 sat 98%", "hematocrit 35%" — NOT "500 mg (about 30%)"
+    (re.compile(
+        r'(?:EF|ejection fraction|O2 sat(?:uration)?|SpO2|hematocrit|Hct|FiO2'  # lab keywords
+        r'|reticulocyte|blast|lymphocyte|neutrophil|eosinophil|basophil|monocyte)'  # more keywords
+        r'[:\s]+(?:\d+\.?\d*\s*[-–]\s*)?(\d+\.?\d*)\s*(%)',
+        re.IGNORECASE), 'percentage'),
+]
 
 TEMPORAL_PATTERNS = [
     (re.compile(r'POD\s*#?\s*(\d+)', re.IGNORECASE), 'POD'),
@@ -130,7 +150,7 @@ class ClinicalErrorSynthesizer:
     for the LED error correction model.
     """
 
-    ERROR_TYPES = ['MED_NAME', 'MED_DOSE', 'TEMPORAL', 'NEGATION', 'PROCEDURE']
+    ERROR_TYPES = ['MED_NAME', 'MED_DOSE', 'TEMPORAL', 'NEGATION', 'PROCEDURE', 'LAB_VALUE']
 
     def __init__(
         self,
@@ -202,6 +222,8 @@ class ClinicalErrorSynthesizer:
             return self._corrupt_negation(summary)
         elif error_type == 'PROCEDURE':
             return self._corrupt_procedure(summary, source_note)
+        elif error_type == 'LAB_VALUE':
+            return self._corrupt_lab_value(summary)
         return summary, None
 
     # ── Error Type 1: Medication Name Swap ──
@@ -366,6 +388,72 @@ class ClinicalErrorSynthesizer:
                             'original': sentence.strip(),
                             'corrupted': corrupted_sentence.strip(),
                         }
+
+        return summary, None
+
+    # ── Error Type 6: Lab Value Corruption ──
+
+    def _corrupt_lab_value(self, summary: str) -> Tuple[str, Optional[Dict]]:
+        """
+        Corrupt a laboratory result value by shifting it ±20–50%.
+
+        Targets clinical chemistry, CBC counts, and percentage-based lab values
+        (e.g. EF, O2 saturation, hematocrit). Shift magnitudes are chosen to
+        be clinically significant but not obviously impossible.
+        """
+        for pattern, lab_type in LAB_PATTERNS:
+            matches = list(pattern.finditer(summary))
+            if not matches:
+                continue
+
+            match = self.rng.choice(matches)
+
+            # Group indices differ between percentage pattern (keyword-anchored)
+            # and value patterns: always capture (value, unit) as last 2 groups.
+            groups = match.groups()
+            original_val_str = groups[-2]   # second-to-last group = numeric value
+            unit              = groups[-1]   # last group = unit string
+
+            try:
+                original_val = float(original_val_str)
+            except ValueError:
+                continue
+
+            if original_val == 0:
+                continue
+
+            # Shift ±20%, ±30%, or ±50% — always non-zero direction
+            shift_pct = self.rng.choice([0.2, 0.3, 0.5])
+            direction = self.rng.choice([-1, 1])
+            new_val   = original_val * (1 + direction * shift_pct)
+            new_val   = max(0.0, new_val)   # no negative lab values
+
+            # Round to match clinical precision norms
+            if original_val >= 100:
+                new_val_str = str(int(round(new_val)))
+            elif original_val >= 10:
+                new_val_str = f"{new_val:.1f}"
+            else:
+                new_val_str = f"{new_val:.2f}"
+
+            # Rebuild only the numeric+unit span (preserve surrounding keyword text)
+            original_span = original_val_str + match.group(0)[match.group(0).find(original_val_str)
+                                                               + len(original_val_str):match.group(0).find(unit)
+                                                               + len(unit)]
+            # Simpler: replace the full match, substituting value string in-place
+            original_full = match.group(0)
+            corrupted_span = original_full.replace(original_val_str, new_val_str, 1)
+            corrupted = summary[:match.start()] + corrupted_span + summary[match.end():]
+
+            if corrupted == summary:
+                continue
+
+            return corrupted, {
+                'type':     'LAB_VALUE',
+                'lab_type': lab_type,
+                'original': original_full,
+                'corrupted': corrupted_span,
+            }
 
         return summary, None
 

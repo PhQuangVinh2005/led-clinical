@@ -285,3 +285,92 @@ class TestProcedureCorruption:
         note = "Patient underwent coronary angiography and stent placement."
         procs = ClinicalErrorSynthesizer._extract_procedures(note)
         assert len(procs) >= 1
+
+
+# ──────────────────────────────────────────────────────────────
+# Error Type 6: LAB_VALUE
+# ──────────────────────────────────────────────────────────────
+
+class TestLabValueCorruption:
+
+    def test_chemistry_value_changed(self, drug_dict):
+        synth = make_synthesizer(drug_dict, seed=0)
+        summary = "Sodium 138 mEq/L, creatinine 1.2 mg/dL, glucose 105 mg/dL."
+        text, detail = synth._corrupt_lab_value(summary)
+        assert detail is not None
+        assert detail['type'] == 'LAB_VALUE'
+        assert detail['lab_type'] == 'chemistry'
+        assert detail['original'] != detail['corrupted']
+        assert text != summary
+
+    def test_cbc_value_changed(self, drug_dict):
+        synth = make_synthesizer(drug_dict, seed=1)
+        summary = "WBC 8.5 K/uL, platelets 220 K/uL, hemoglobin 12.3 g/dL."
+        text, detail = synth._corrupt_lab_value(summary)
+        assert detail is not None
+        assert detail['type'] == 'LAB_VALUE'
+
+    def test_percentage_value_changed(self, drug_dict):
+        synth = make_synthesizer(drug_dict, seed=0)
+        summary = "Echocardiogram revealed EF 45%, patient on 2L O2."
+        text, detail = synth._corrupt_lab_value(summary)
+        assert detail is not None
+        assert detail['type'] == 'LAB_VALUE'
+        assert detail['lab_type'] == 'percentage'
+        assert text != summary
+
+    def test_no_lab_values_unchanged(self, drug_dict):
+        synth = make_synthesizer(drug_dict)
+        summary = "Patient was admitted for evaluation of chest pain."
+        text, detail = synth._corrupt_lab_value(summary)
+        assert text == summary
+        assert detail is None
+
+    def test_corrupted_value_is_numeric(self, drug_dict):
+        """The corrupted string must contain a digit."""
+        import re
+        synth = make_synthesizer(drug_dict, seed=2)
+        summary = "Potassium 4.5 mEq/L on admission."
+        text, detail = synth._corrupt_lab_value(summary)
+        if detail:
+            assert re.search(r'\d', detail['corrupted']) is not None
+
+    def test_no_negative_lab_values(self, drug_dict):
+        """Shifted values must never go below zero."""
+        import re
+        synth = make_synthesizer(drug_dict, seed=99)
+        # Very small original value — large negative shift should floor at 0
+        summary = "Troponin 0.01 mg/dL."
+        for _ in range(20):
+            text, detail = synth._corrupt_lab_value(summary)
+            if detail:
+                nums = re.findall(r'\d+\.?\d*', detail['corrupted'])
+                assert all(float(n) >= 0 for n in nums)
+
+    def test_dosage_units_not_matched(self, drug_dict):
+        """LAB_VALUE should NOT match plain mg/mcg/mL dosage units."""
+        synth = make_synthesizer(drug_dict, seed=0)
+        # These are drug doses, not lab values — LAB_PATTERNS should miss them
+        summary = "Patient given metoprolol 50 mg and furosemide 40 mg."
+        text, detail = synth._corrupt_lab_value(summary)
+        # mg alone (without /dL etc.) should not match chemistry pattern
+        assert detail is None or detail['lab_type'] != 'chemistry'
+
+    def test_lab_value_in_valid_error_types(self, drug_dict):
+        """LAB_VALUE must be declared in ERROR_TYPES."""
+        assert 'LAB_VALUE' in ClinicalErrorSynthesizer.ERROR_TYPES
+
+    @pytest.mark.parametrize("summary,lab_type", [
+        ("Creatinine 2.1 mg/dL, BUN 30 mg/dL.", "chemistry"),
+        ("WBC 12.0 K/uL.", "cbc"),
+        ("EF 35% on echo.", "percentage"),
+        ("Hematocrit 28%.", "percentage"),
+        ("SpO2 94%.", "percentage"),
+    ])
+    def test_parametrized_lab_types(self, drug_dict, summary, lab_type):
+        synth = make_synthesizer(drug_dict, seed=0)
+        text, detail = synth._corrupt_lab_value(summary)
+        if detail:  # pattern matched
+            assert detail['lab_type'] == lab_type
+            assert text != summary
+
