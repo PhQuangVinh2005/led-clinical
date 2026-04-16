@@ -70,14 +70,20 @@ class LEDCorrectionDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         record = self.records[idx]
-        source_note = record['input']
-        true_summary = record['target']
-
-        # Apply synthetic corruption (only during training)
-        result = self.synthesizer.corrupt(true_summary, source_note)
+        source_note = record.get('input', '')
+        # Priority 1: Use pre-applied corruption from preprocessing
+        if 'corrupted_summary' in record and 'true_summary' in record:
+            corrupted_summary = record['corrupted_summary']
+            true_summary = record['true_summary']
+        else:
+            # Priority 2: Fallback to on-the-fly corruption (legacy/development)
+            source_note = record.get('input', '')
+            true_summary = record.get('target', '')
+            result = self.synthesizer.corrupt(true_summary, source_note)
+            corrupted_summary = result.corrupted_summary
 
         # Build input: [corrupted_summary] </s> [source_note]
-        input_text = result.corrupted_summary + " </s> " + source_note
+        input_text = corrupted_summary + " </s> " + source_note
         target_text = true_summary
 
         # Tokenize input

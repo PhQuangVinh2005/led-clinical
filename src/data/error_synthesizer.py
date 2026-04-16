@@ -226,6 +226,7 @@ class ClinicalErrorSynthesizer:
             'type': 'MED_NAME',
             'original': target_drug,
             'corrupted': substitute,
+            'entity_class': self.drug_dict.get_entity_class(target_drug)
         }
 
     # ── Error Type 2: Dosage Corruption ──

@@ -27,6 +27,7 @@ class DrugDictionary:
         self.id_to_name: Dict[str, str] = {}
         self.source_to_names: Dict[str, List[str]] = {}
         self.all_drug_names: Set[str] = set()
+        self.name_to_class: Dict[str, str] = {}  # Added to track entity class
 
         # Only keep drug entries (filter out disease entries)
         for i in range(table.num_rows):
@@ -46,6 +47,7 @@ class DrugDictionary:
             self.name_to_id[name_lower] = drug_id
             self.id_to_name[drug_id] = name
             self.all_drug_names.add(name_lower)
+            self.name_to_class[name_lower] = label  # Store the source class/label
 
             # Group by source label for same-class swaps
             if label not in self.source_to_names:
@@ -96,3 +98,7 @@ class DrugDictionary:
     def get_any_random_drug(self) -> str:
         """Get any random drug name from the dictionary."""
         return self.rng.choice(list(self.all_drug_names))
+
+    def get_entity_class(self, name: str) -> Optional[str]:
+        """Return the class/label for a given entity name."""
+        return self.name_to_class.get(name.lower())

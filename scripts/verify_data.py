@@ -97,17 +97,28 @@ def main():
                 break
                 
             record = json.loads(line)
-            source_note = record['input']
-            true_summary = record['target']
             
-            # Apply synthesis
-            result = synth.corrupt(true_summary, source_note)
+            # Check if this is a pre-corrupted file or a raw one
+            is_pre_corrupted = 'corrupted_summary' in record and 'true_summary' in record
             
+            if is_pre_corrupted:
+                source_note = record['input']
+                true_summary = record['true_summary']
+                corrupted_summary = record['corrupted_summary']
+                # We can't see details for pre-baked errors unless we check the log file,
+                # but for this diagnostic we can re-run synth on the true summary to see logic
+                result = synth.corrupt(true_summary, source_note)
+            else:
+                source_note = record['input']
+                true_summary = record['target']
+                result = synth.corrupt(true_summary, source_note)
+
             if not result.is_corrupted:
-                continue  # Skip uncorrupted ones so we see the errors
+                continue
                 
             print(f"\n{'='*80}")
-            print(f"SAMPLE #{samples_shown + 1} | Error Types: {', '.join(result.error_types)}")
+            print(f"SAMPLE #{samples_shown + 1} | Error Types: {', '.join(result.error_types)} "
+                  f"{'(Pre-baked)' if is_pre_corrupted else '(On-the-fly)'}")
             print(f"{'='*80}")
             
             print(f"\n[TRUE SUMMARY]:\n{true_summary}")
@@ -120,7 +131,8 @@ def main():
                 e_type = detail.get('type')
                 orig = detail.get('original')
                 corr = detail.get('corrupted')
-                print(f"  - {e_type}: '{orig}' -> '{corr}'")
+                e_class = detail.get('entity_class', 'N/A')
+                print(f"  - {e_type}: '{orig}' -> '{corr}' (Class: {e_class})")
             
             # Show LED input string (first 200 chars)
             input_str = result.corrupted_summary + " </s> " + source_note

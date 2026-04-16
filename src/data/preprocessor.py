@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 from tqdm import tqdm
 
+from src.data.drug_dictionary import DrugDictionary
+from src.data.error_synthesizer import ClinicalErrorSynthesizer
+
 
 def load_held_out_ids(held_out_path: str) -> Set[str]:
     """Load the set of held-out note IDs to exclude from training."""
@@ -146,9 +149,11 @@ def preprocess(
     output_dir: str,
     min_target_tokens: int = 50,
     max_target_tokens: int = 2000,
+    parquet_path: str = "data/raw/drug-dictionary/heh.parquet",
+    corruption_rate: float = 0.3,
     seed: int = 42,
 ) -> None:
-    """Full preprocessing pipeline."""
+    """Full preprocessing pipeline with static error corruption."""
     # 1. Load held-out IDs
     held_out_ids = load_held_out_ids(held_out_path)
 
@@ -158,13 +163,48 @@ def preprocess(
     # 3. Apply target filter
     records = apply_target_filter(records, min_target_tokens, max_target_tokens)
 
-    # 4. Stratified split
-    print("[Preprocessor] Performing stratified split 80/10/10:")
-    train, val, test = stratified_split(records, seed=seed)
+    # 5. Initialize Synthesizer
+    print(f"[Preprocessor] Initializing synth (rate={corruption_rate})...")
+    drug_dict = DrugDictionary(parquet_path=parquet_path, seed=seed)
+    synth = ClinicalErrorSynthesizer(drug_dict, corruption_rate=corruption_rate, seed=seed)
 
-    # 5. Save
-    save_jsonl(train, os.path.join(output_dir, 'train.jsonl'))
-    save_jsonl(val, os.path.join(output_dir, 'val.jsonl'))
-    save_jsonl(test, os.path.join(output_dir, 'test.jsonl'))
+    # 6. Apply Corruption and Save
+    corruption_logs = []
+
+    for split_name, split_data in [("train", train), ("val", val), ("test", test)]:
+        processed_records = []
+        for record in tqdm(split_data, desc=f"Corrupting {split_name}"):
+            source_note = record['input']
+            true_summary = record['target']
+            
+            # Apply corruption
+            result = synth.corrupt(true_summary, source_note)
+            
+            # Update record structure
+            record['true_summary'] = true_summary
+            record['corrupted_summary'] = result.corrupted_summary
+            
+            # We keep 'input' and 'target' for backward compatibility 
+            # but favor the explicit names.
+            # In our new training logic: input = [corrupted] </s> [source]
+            # but for now we just store the components.
+            processed_records.append(record)
+            
+            # Log the errors if they occurred
+            if result.is_corrupted:
+                corruption_logs.append({
+                    "note_id": record['note_id'],
+                    "split": split_name,
+                    "applied_errors": result.error_details
+                })
+        
+        save_jsonl(processed_records, os.path.join(output_dir, f'{split_name}.jsonl'))
+
+    # 7. Save Corruption Log
+    log_path = os.path.join(output_dir, 'corruption_log.jsonl')
+    with open(log_path, 'w', encoding='utf-8') as f:
+        for entry in tqdm(corruption_logs, desc="Saving corruption log"):
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    print(f"[Preprocessor] Saved {len(corruption_logs)} corruption events to {log_path}")
 
     print("[Preprocessor] Done!")

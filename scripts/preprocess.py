@@ -31,6 +31,11 @@ def main():
                         help="Minimum target token count")
     parser.add_argument("--max-target-tokens", type=int, default=2000,
                         help="Maximum target token count")
+    parser.add_argument("--parquet-path", type=str,
+                        default="data/raw/drug-dictionary/heh.parquet",
+                        help="Path to heh.parquet dictionary")
+    parser.add_argument("--corruption-rate", type=float, default=0.3,
+                        help="Rate of corruption for pre-applied errors")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
 
@@ -42,6 +47,8 @@ def main():
         output_dir=args.output_dir,
         min_target_tokens=args.min_target_tokens,
         max_target_tokens=args.max_target_tokens,
+        parquet_path=args.parquet_path,
+        corruption_rate=args.corruption_rate,
         seed=args.seed,
     )
 
