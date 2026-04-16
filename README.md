@@ -141,12 +141,48 @@ led-clinical-corrector/
 │   ├── train.py                 # CLI: fine-tuning with OOM protection
 │   └── evaluate.py              # CLI: evaluation with per-error-type analysis
 ├── outputs/                     # Training outputs and checkpoints
+├── tests/
+│   ├── conftest.py              # Shared pytest fixtures (stubs)
+│   ├── test_error_synthesizer.py # Unit tests for 5 error types
+│   ├── test_drug_dictionary.py  # Unit tests for lookup logic
+│   ├── test_metrics.py           # Unit tests for ROUGE/Correction Rate
+│   └── test_smoke.py             # Smoke tests for Dataset/Model forward
 ├── environment.yaml             # Conda env spec
 ├── requirements.txt             # Pip dependencies
+├── pytest.ini                   # Pytest configuration
 └── README.md
 ```
 
 ---
+
+## Testing
+
+The repository includes a comprehensive test suite to ensure the reliability of the data corruption pipeline and model integration.
+
+### 1. Install Dependencies
+```bash
+pip install pytest pytest-mock
+```
+
+### 2. Run Unit Tests (Fast)
+Verifies data synthesis, metrics logic, and drug lookups using stubbed dictionaries (no heavy models or parquet files).
+```bash
+pytest -m "not smoke" -v
+```
+
+### 3. Run Full Suite (Slow)
+Includes "smoke tests" that verify the end-to-end flow from JSONL loading → Tokenization → Model Forward Pass on CPU.
+```bash
+pytest -v
+```
+
+| Component | Coverage |
+| :--- | :--- |
+| **Error Synthesizer** | Unit tests for all 5 error types, regex patterns, and deterministic seeding. |
+| **Drug Dictionary** | Word-boundary matching, case-insensitivity, and intra-class substitution logic. |
+| **Metrics** | ROUGE score propagation and correction rate logic (exact match vs improvement). |
+| **Integration** | Dataset tensor shapes, padding masks, and model forward pass compatibility. |
+
 
 ## Evaluation Metrics
 
