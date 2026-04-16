@@ -161,8 +161,8 @@ class ClinicalErrorSynthesizer:
                 is_corrupted=False,
             )
 
-        # Select 1-3 random error types
-        n_errors = self.rng.randint(1, 3)
+        # Select 1-2 random error types (keeps corruption realistic + easier to correct)
+        n_errors = self.rng.randint(1, 2)
         selected_types = self.rng.sample(self.ERROR_TYPES, min(n_errors, len(self.ERROR_TYPES)))
 
         corrupted = summary

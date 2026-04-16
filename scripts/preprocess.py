@@ -1,22 +1,25 @@
-#!/usr/bin/env python3
 """
 CLI script for data preprocessing.
 
 Usage:
-    # Full run (writes train/val/test.jsonl + corruption_log.jsonl):
+    # Full run — streams to disk every 5000 records; resumes automatically if re-run:
     python scripts/preprocess.py
 
-    # Dry run — process first 1000 records, print corruption stats, no files written:
+    # Dry run — process first 1000 records, print corruption stats, write nothing:
     python scripts/preprocess.py --dry-run
 
-    # Dry run with custom slice size:
+    # Dry run with custom slice:
     python scripts/preprocess.py --dry-run --dry-run-n 500
 
-    # Force overwrite even if output files already exist:
-    python scripts/preprocess.py --no-skip
+    # Customise flush frequency (lower = safer against crashes):
+    python scripts/preprocess.py --write-every 2000
+
+    # Force re-process from scratch (removes existing files first — be careful!):
+    python scripts/preprocess.py --fresh
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -63,11 +66,22 @@ def main():
                         help="Process only the first --dry-run-n records; "
                              "print corruption stats but write NO files")
     parser.add_argument("--dry-run-n", type=int, default=1000,
-                        help="Number of records to sample in dry-run mode")
-    parser.add_argument("--no-skip", action="store_true",
-                        help="Overwrite existing output files (default: skip them)")
+                        help="Number of records to process in dry-run mode")
+    parser.add_argument("--write-every", type=int, default=5000,
+                        help="Flush to disk every N records (lower = safer vs crashes)")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Delete existing output files and start from scratch")
 
     args = parser.parse_args()
+
+    # ── --fresh: remove existing outputs so we start clean ───────────────────
+    if args.fresh and not args.dry_run:
+        output_dir = args.output_dir
+        for fname in ("train.jsonl", "val.jsonl", "test.jsonl", "corruption_log.jsonl"):
+            fpath = os.path.join(output_dir, fname)
+            if os.path.exists(fpath):
+                os.remove(fpath)
+                print(f"[preprocess.py] Removed {fpath}")
 
     preprocess(
         csv_path=args.csv_path,
@@ -80,9 +94,10 @@ def main():
         seed=args.seed,
         dry_run=args.dry_run,
         dry_run_n=args.dry_run_n,
-        skip_existing=not args.no_skip,
+        write_every=args.write_every,
     )
 
 
 if __name__ == "__main__":
     main()
+
