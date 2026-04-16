@@ -51,6 +51,10 @@ class StubDrugDictionary:
     def get_any_random_drug(self) -> str:
         return self.rng.choice(list(self.all_drug_names))
 
+    def get_entity_class(self, name: str) -> Optional[str]:
+        """Stub: always returns a generic class label."""
+        return "Drug::Brand" if name.lower() in self.all_drug_names else None
+
 
 @pytest.fixture
 def drug_dict():
@@ -97,8 +101,20 @@ def sample_note():
 def tmp_jsonl(tmp_path):
     """Creates a small temporary JSONL dataset file."""
     records = [
-        {"input": SAMPLE_NOTE, "target": SAMPLE_SUMMARY},
-        {"input": SAMPLE_NOTE + " Additional text.", "target": SAMPLE_SUMMARY + " Follow-up needed."},
+        {
+            "note_id": "test_001",
+            "input": SAMPLE_NOTE,
+            "target": SAMPLE_SUMMARY,
+            "true_summary": SAMPLE_SUMMARY,
+            "corrupted_summary": SAMPLE_SUMMARY,  # pass-through (not corrupted)
+        },
+        {
+            "note_id": "test_002",
+            "input": SAMPLE_NOTE + " Additional text.",
+            "target": SAMPLE_SUMMARY + " Follow-up needed.",
+            "true_summary": SAMPLE_SUMMARY + " Follow-up needed.",
+            "corrupted_summary": SAMPLE_SUMMARY + " Follow-up needed.",
+        },
     ]
     path = tmp_path / "test.jsonl"
     with open(path, "w") as f:

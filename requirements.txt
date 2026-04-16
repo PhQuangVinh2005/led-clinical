@@ -10,4 +10,4 @@ accelerate
 sentencepiece
 pytest
 pytest-mock
-
+pyahocorasick
