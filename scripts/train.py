@@ -154,7 +154,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         callbacks=[GPUMemoryCallback(log_every_n_steps=500)],
     )
 

@@ -6,24 +6,35 @@ Fine-tune [LED-base](https://huggingface.co/allenai/led-base-16384) (`allenai/le
 
 This repository implements a rule-based synthetic error generation pipeline to create training data, then fine-tunes LED to correct these errors. Designed to integrate into the clinical text summarization thesis pipeline as a post-processing step to reduce hallucinations.
 
-**Approach**: Based on Cao et al. (EMNLP 2020) "Factual Error Correction", adapted for clinical domain using LED instead of BART to handle long clinical notes (up to 16K tokens).
+**Approach**: Based on Cao et al. (EMNLP 2020) "Factual Error Correction", adapted for the clinical domain using LED instead of BART to handle long clinical notes (up to 16K tokens).
 
 **Input format**: `[corrupted_summary] </s> [source_clinical_note]`  
 **Output**: `[corrected_summary]`
 
 ---
 
-## Error Types (5)
+## Error Types (6)
 
 | # | Type | Method | Example |
 |---|------|--------|---------|
-| 1 | **Medication Name Swap** | Match drug names from 173K-entry dictionary, swap with same-class drug | "calcium" → "tetrodotoxin" |
-| 2 | **Dosage Corruption** | Regex `(\d+\.?\d*)\s*(mg\|mcg\|mL\|units?\|g)`, multiply by random factor | "500 mg" → "250 mg" |
-| 3 | **Temporal/POD Corruption** | 8 regex patterns (POD, HD, dates), shift ±1-3 days | "POD #3" → "POD #5" |
-| 4 | **Negation Insertion/Removal** | Context-aware pos↔neg pattern pairs with guard phrases | "no signs of X" → "signs of X" |
-| 5 | **Procedure Swap** | Extract procedures from source note sections, intra-note swap | "craniotomy" → "biopsy" |
+| 1 | **Medication Name Swap** (`MED_NAME`) | Aho-Corasick lookup against 173K-entry dictionary, swap with same-class drug | `"calcium"` → `"tetrodotoxin"` |
+| 2 | **Dosage Corruption** (`MED_DOSE`) | Regex `(\d+\.?\d*)\s*(mg\|mcg\|mL\|units?\|g)`, multiply by random factor | `"500 mg"` → `"250 mg"` |
+| 3 | **Temporal/POD Corruption** (`TEMPORAL`) | 8 regex patterns (POD, HD, dates), shift ±1-3 days | `"POD #3"` → `"POD #5"` |
+| 4 | **Negation Insertion/Removal** (`NEGATION`) | Context-aware pos↔neg pattern pairs with guard phrases | `"no signs of X"` → `"signs of X"` |
+| 5 | **Procedure Swap** (`PROCEDURE`) | Extract procedures from source note sections, intra-note swap | `"craniotomy"` → `"biopsy"` |
+| 6 | **Lab Value Corruption** (`LAB_VALUE`) | Shift chemistry/CBC/percentage lab results ±20–50% | `"Na 138 mEq/L"` → `"Na 97 mEq/L"` |
 
-**Corruption strategy**: α=0.3 (30% samples corrupted with 1-3 error types, 70% pass-through as identity mapping)
+**Corruption strategy**: α=0.3 (30% samples corrupted with **1–2 error types**, 70% pass-through as identity mapping)
+
+### Lab Value Pattern Coverage
+
+| Sub-type | Units matched | Example |
+|----------|--------------|---------|
+| `chemistry` | mg/dL, g/dL, mmol/L, mEq/L, IU/L, U/L, ng/mL, pg/mL, µg/dL | `creatinine 1.2 mg/dL` |
+| `cbc` | K/uL, K/µL, ×10^3/uL, ×10^9/L, cells/uL | `WBC 8.5 K/uL` |
+| `percentage` | Keyword-anchored `%`: EF, O2 sat, SpO2, hematocrit, Hct, FiO2, etc. | `EF 45%`, `SpO2 94%` |
+
+> **Note**: Lab units are strictly separated from drug dosage units — `mg` alone (used in `MED_DOSE`) will not trigger `LAB_VALUE`.
 
 ---
 
@@ -34,28 +45,54 @@ This repository implements a rule-based synthetic error generation pipeline to c
 conda create -n bart python=3.11 -y
 conda activate bart
 pip install torch --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements.txt
+pip install -r requirements.txt   # includes pyahocorasick
 ```
 
 ### 2. Preprocess Data
+
 ```bash
+# Dry run first — validates corruption logic, writes no files (~2 min):
+python scripts/preprocess.py --dry-run --dry-run-n 2000
+
+# Full run — streams to disk every 5000 records, auto-resumes on crash:
 python scripts/preprocess.py
 ```
-Loads MIMIC-IV-BHC (~270K samples), excludes 1500 held-out thesis evaluation samples, creates stratified 80/10/10 splits.
+
+> **Crash recovery**: If preprocessing is interrupted, simply re-run `python scripts/preprocess.py`. It counts existing lines in each `.jsonl` file and resumes from where it left off. The corruption log is also appended in real time.
+
+**All preprocess flags**:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dry-run` | off | Process N records only; print stats; write nothing |
+| `--dry-run-n N` | 1000 | Records to process in dry-run |
+| `--write-every N` | 5000 | Flush to disk every N records |
+| `--fresh` | off | Delete existing output files and start from scratch |
+| `--corruption-rate F` | 0.3 | Fraction of samples to corrupt |
+| `--seed N` | 42 | Random seed |
 
 **Preprocessing results**:
 ```
 Total CSV records:     270,033
-Held-out excluded:      1,500
-After target filter:  265,049
+Held-out excluded:       1,500
+After target filter:   265,049
 
 Stratified Split (80/10/10):
   range_0_1k:   13,638 → train 10,910 / val  1,363 / test  1,365
   range_1k_2k: 104,056 → train 83,244 / val 10,405 / test 10,407
   range_2k_4k: 147,355 → train 117,884 / val 14,735 / test 14,736
   ─────────────────────────────────────────────────────────────────
-  Total:       265,049 → train 212,038 / val 26,503 / test 26,508
+  Total:        265,049 → train 212,038 / val 26,503 / test 26,508
 ```
+
+**Output files** (in `data/processed/`):
+
+| File | Description |
+|------|-------------|
+| `train.jsonl` | 212,038 samples with `true_summary` + `corrupted_summary` |
+| `val.jsonl` | 26,503 samples |
+| `test.jsonl` | 26,508 samples |
+| `corruption_log.jsonl` | One entry per corrupted sample: `note_id`, `split`, `applied_errors` (with `entity_class` for drug swaps) |
 
 ### 3. Train
 ```bash
@@ -68,7 +105,19 @@ Resume from crash:
 python scripts/train.py --config configs/train_config.yaml --resume
 ```
 
-### 4. Evaluate
+### 4. Verify Data (optional)
+```bash
+# Integrity check + show 5 corrupted examples:
+python scripts/verify_data.py --file data/processed/val.jsonl
+
+# Integrity check only (fast):
+python scripts/verify_data.py --integrity-only
+
+# Print corruption_log.jsonl statistics:
+python scripts/verify_data.py --log-stats
+```
+
+### 5. Evaluate
 ```bash
 python scripts/evaluate.py --checkpoint outputs/led-corrector-v1/final --split test
 ```
@@ -80,7 +129,7 @@ python scripts/evaluate.py --checkpoint outputs/led-corrector-v1/final --split t
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | Model | `allenai/led-base-16384` | ~162M params |
-| Max input length | 8192 tokens | summary + source note |
+| Max input length | 8192 tokens | corrupted summary + source note |
 | Max target length | 2048 tokens | corrected summary |
 | Epochs | 10 | |
 | Batch size | 2 × 8 grad accum = 16 effective | |
@@ -103,7 +152,7 @@ python scripts/evaluate.py --checkpoint outputs/led-corrector-v1/final --split t
 | Auto resume from checkpoint | ✅ | Re-run with `--resume` flag |
 | `save_total_limit: 5` | ✅ | Prevents disk filling |
 | GPU memory logging | ✅ | Logs VRAM every 500 steps |
-| `torch.cuda.empty_cache()` | ⚠️ | Only frees unused memory, called between eval steps |
+| Preprocessing streaming writes | ✅ | Flushes every 5000 records; crash-resumable |
 
 **Estimated training time**: ~80-120 hours (3-5 days) on RTX 5060 Ti 16GB.
 
@@ -125,29 +174,31 @@ led-clinical-corrector/
 │   └── processed/               # Generated by scripts/preprocess.py
 │       ├── train.jsonl          # 212,038 samples
 │       ├── val.jsonl            # 26,503 samples
-│       └── test.jsonl           # 26,508 samples
+│       ├── test.jsonl           # 26,508 samples
+│       └── corruption_log.jsonl # Per-error audit log
 ├── src/
 │   ├── data/
-│   │   ├── preprocessor.py      # CSV loading, held-out exclusion, stratified split
-│   │   ├── error_synthesizer.py # 5-type rule-based error injection
-│   │   ├── drug_dictionary.py   # Drug name lookup (173K drug entries)
-│   │   └── dataset.py           # PyTorch Dataset with on-the-fly corruption
+│   │   ├── preprocessor.py      # CSV loading, stratified split, streaming corruption
+│   │   ├── error_synthesizer.py # 6-type rule-based error injection
+│   │   ├── drug_dictionary.py   # Aho-Corasick drug lookup (173K entries)
+│   │   └── dataset.py           # PyTorch Dataset; reads pre-baked corruptions
 │   ├── model/
 │   │   └── led_corrector.py     # LED model wrapper + generation config
 │   └── utils/
 │       └── metrics.py           # ROUGE + correction rate metrics
 ├── scripts/
-│   ├── preprocess.py            # CLI: data preprocessing
+│   ├── preprocess.py            # CLI: streaming preprocessing with --dry-run / --fresh
 │   ├── train.py                 # CLI: fine-tuning with OOM protection
-│   └── evaluate.py              # CLI: evaluation with per-error-type analysis
+│   ├── evaluate.py              # CLI: evaluation with per-error-type analysis
+│   └── verify_data.py           # CLI: integrity check + corruption example viewer
 ├── outputs/                     # Training outputs and checkpoints
 ├── tests/
-│   ├── conftest.py              # Shared pytest fixtures (stubs)
-│   ├── test_error_synthesizer.py # Unit tests for 5 error types
-│   ├── test_drug_dictionary.py  # Unit tests for lookup logic
-│   ├── test_metrics.py           # Unit tests for ROUGE/Correction Rate
-│   └── test_smoke.py             # Smoke tests for Dataset/Model forward
-├── environment.yaml             # Conda env spec
+│   ├── conftest.py              # Shared pytest fixtures (stubs, no I/O)
+│   ├── test_error_synthesizer.py # Unit tests for all 6 error types
+│   ├── test_drug_dictionary.py  # Unit tests for Aho-Corasick lookup logic
+│   ├── test_metrics.py          # Unit tests for ROUGE/Correction Rate
+│   └── test_smoke.py            # Smoke tests for Dataset/Model forward pass
+├── environment.yaml             # Conda env spec (includes pyahocorasick)
 ├── requirements.txt             # Pip dependencies
 ├── pytest.ini                   # Pytest configuration
 └── README.md
@@ -157,32 +208,62 @@ led-clinical-corrector/
 
 ## Testing
 
-The repository includes a comprehensive test suite to ensure the reliability of the data corruption pipeline and model integration.
-
 ### 1. Install Dependencies
 ```bash
-pip install pytest pytest-mock
+pip install pytest pytest-mock pyahocorasick
 ```
 
-### 2. Run Unit Tests (Fast)
-Verifies data synthesis, metrics logic, and drug lookups using stubbed dictionaries (no heavy models or parquet files).
+### 2. Run Unit Tests (Fast, no GPU/data needed)
 ```bash
 pytest -m "not smoke" -v
 ```
 
-### 3. Run Full Suite (Slow)
-Includes "smoke tests" that verify the end-to-end flow from JSONL loading → Tokenization → Model Forward Pass on CPU.
+### 3. Run Full Suite (includes model forward pass on CPU)
 ```bash
 pytest -v
 ```
 
 | Component | Coverage |
 | :--- | :--- |
-| **Error Synthesizer** | Unit tests for all 5 error types, regex patterns, and deterministic seeding. |
-| **Drug Dictionary** | Word-boundary matching, case-insensitivity, and intra-class substitution logic. |
+| **Error Synthesizer** | Unit tests for all 6 error types, regex patterns, deterministic seeding, and boundary guards. |
+| **Lab Value** | 10 tests covering chemistry/CBC/percentage branches, no-negative guard, dosage unit isolation, and parametrized surface forms. |
+| **Drug Dictionary** | Aho-Corasick word-boundary matching, case-insensitivity, and intra-class substitution logic. |
 | **Metrics** | ROUGE score propagation and correction rate logic (exact match vs improvement). |
-| **Integration** | Dataset tensor shapes, padding masks, and model forward pass compatibility. |
+| **Integration** | Dataset tensor shapes, padding masks, global attention mask, and model forward pass compatibility. |
 
+---
+
+## JSONL Record Schema
+
+Each record in `train/val/test.jsonl` has the following fields:
+
+```json
+{
+  "note_id":          "12345",
+  "input":            "<source clinical note>",
+  "target":           "<original summary>",
+  "input_tokens":     1842,
+  "target_tokens":    312,
+  "range":            "range_1k_2k",
+  "true_summary":     "<original summary>",
+  "corrupted_summary":"<corrupted summary (= true_summary if clean sample)>"
+}
+```
+
+The `corruption_log.jsonl` has one entry per corrupted sample:
+
+```json
+{
+  "note_id": "12345",
+  "split":   "train",
+  "applied_errors": [
+    {"type": "MED_NAME", "original": "aspirin", "corrupted": "warfarin", "entity_class": "Drug::Brand"},
+    {"type": "LAB_VALUE", "original": "Na 138 mEq/L", "corrupted": "Na 97 mEq/L", "lab_type": "chemistry"}
+  ]
+}
+```
+
+---
 
 ## Evaluation Metrics
 
