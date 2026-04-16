@@ -47,8 +47,9 @@ def load_model_and_tokenizer(
         model.gradient_checkpointing_enable()
 
     # Set generation config for inference
+    # max_length must be <= max_decoder_position_embeddings (1024 for led-base-16384)
     model.generation_config = GenerationConfig(
-        max_length=2048,
+        max_length=1024,
         num_beams=4,
         length_penalty=1.0,
         no_repeat_ngram_size=3,

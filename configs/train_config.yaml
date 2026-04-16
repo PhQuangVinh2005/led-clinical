@@ -5,7 +5,10 @@ output_dir: "outputs/led-corrector-v1"
 # Data
 data_dir: "data/processed"
 max_input_length: 8192
-max_target_length: 2048
+# max_decoder_position_embeddings = 1024 for led-base-16384.
+# The decoder position embedding table has exactly 1024 rows — any
+# target length > 1024 causes a CUDA "vectorized_gather_kernel" OOB crash.
+max_target_length: 1024
 corruption_rate: 0.3
 
 # Training

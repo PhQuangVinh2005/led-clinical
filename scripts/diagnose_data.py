@@ -22,6 +22,7 @@ from transformers import AutoTokenizer, default_data_collator
 from transformers import DataCollatorForSeq2Seq
 
 VOCAB_SIZE = 50265   # expected for allenai/led-base-16384
+MAX_DECODER_POS = 1024  # max_decoder_position_embeddings in led-base-16384 config
 MODEL_NAME = "allenai/led-base-16384"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -116,8 +117,18 @@ def main():
     parser.add_argument("--n-samples", type=int, default=16,
                         help="Number of records to check")
     parser.add_argument("--max-input",  type=int, default=8192)
-    parser.add_argument("--max-target", type=int, default=2048)
+    parser.add_argument("--max-target", type=int, default=1024,
+                        help="Must be <= max_decoder_position_embeddings (1024 for led-base-16384)")
     args = parser.parse_args()
+
+    # ── Decoder position embedding guard ─────────────────────────────────────
+    if args.max_target > MAX_DECODER_POS:
+        print(f"\n*** CONFIG ERROR ***")
+        print(f"  max_target_length={args.max_target} exceeds")
+        print(f"  max_decoder_position_embeddings={MAX_DECODER_POS}")
+        print(f"  This will cause: vectorized_gather_kernel CUDA OOB at step 0.")
+        print(f"  Fix: set max_target_length <= {MAX_DECODER_POS}\n")
+        sys.exit(1)
 
     jsonl_path = f"{args.data_dir}/{args.split}.jsonl"
     print(f"\n{'='*70}")
