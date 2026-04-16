@@ -29,6 +29,20 @@ def load_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = LEDForConditionalGeneration.from_pretrained(model_name)
 
+    # ── Critical: align embedding matrix with tokenizer vocab size ────────────
+    # LED's tokenizer may have a different len() than model.config.vocab_size
+    # (e.g. after special token alignment at load time). If they differ, labels
+    # can contain token IDs >= vocab_size, crashing the CUDA cross-entropy
+    # kernel with "vectorized_gather_kernel index out of bounds".
+    tokenizer_vocab_size = len(tokenizer)
+    model_vocab_size = model.config.vocab_size
+    if tokenizer_vocab_size != model_vocab_size:
+        print(f"[Model] Vocab size mismatch — tokenizer={tokenizer_vocab_size}, "
+              f"model={model_vocab_size}. Resizing embeddings.")
+        model.resize_token_embeddings(tokenizer_vocab_size)
+    else:
+        print(f"[Model] Vocab size OK — {tokenizer_vocab_size} tokens")
+
     if gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
@@ -44,7 +58,8 @@ def load_model_and_tokenizer(
     param_count = sum(p.numel() for p in model.parameters())
     trainable_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[Model] Loaded {model_name}")
-    print(f"  Total params: {param_count:,}")
+    print(f"  Total params:     {param_count:,}")
     print(f"  Trainable params: {trainable_count:,}")
 
     return model, tokenizer
+

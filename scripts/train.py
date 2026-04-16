@@ -99,8 +99,30 @@ def main():
 
     # Load datasets
     data_dir = config.get('data_dir', 'data/processed')
+
+    # ── DrugDictionary: only needed as on-the-fly fallback ────────────────────
+    # If train.jsonl already has 'corrupted_summary' (static pipeline),
+    # skip loading the 173K-entry automaton to save ~10s and ~500MB RAM.
+    import json as _json
+    _train_path = os.path.join(data_dir, 'train.jsonl')
+    _has_baked = False
+    if os.path.exists(_train_path):
+        with open(_train_path) as _f:
+            _first = _json.loads(_f.readline())
+        _has_baked = 'corrupted_summary' in _first
+
+    if _has_baked:
+        logger.info("Pre-baked corruption detected — skipping DrugDictionary load.")
+        drug_dict = None
+    else:
+        logger.info("No pre-baked corruption — loading DrugDictionary for on-the-fly synthesis.")
+        drug_dict = DrugDictionary(
+            parquet_path="data/raw/drug-dictionary/heh.parquet",
+            seed=config.get('seed', 42),
+        )
+
     train_dataset = LEDCorrectionDataset(
-        jsonl_path=os.path.join(data_dir, 'train.jsonl'),
+        jsonl_path=_train_path,
         tokenizer=tokenizer,
         drug_dictionary=drug_dict,
         max_input_length=config.get('max_input_length', 8192),
@@ -123,14 +145,26 @@ def main():
 
     # Training arguments
     output_dir = config.get('output_dir', 'outputs/led-corrector-v1')
+
+    # ── Compute warmup_steps (warmup_ratio is deprecated in transformers v5.2) ─
+    per_device_bs  = config.get('per_device_train_batch_size', 2)
+    grad_accum     = config.get('gradient_accumulation_steps', 8)
+    num_epochs     = config.get('num_train_epochs', 10)
+    effective_bs   = per_device_bs * grad_accum
+    total_steps    = (len(train_dataset) // effective_bs) * num_epochs
+    warmup_ratio   = config.get('warmup_ratio', 0.1)
+    warmup_steps   = max(1, int(total_steps * warmup_ratio))
+    logger.info(f"Total steps: {total_steps:,}  |  Warmup steps: {warmup_steps:,} "
+                f"({warmup_ratio:.0%} of {total_steps:,})")
+
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=config.get('num_train_epochs', 10),
-        per_device_train_batch_size=config.get('per_device_train_batch_size', 2),
+        num_train_epochs=num_epochs,
+        per_device_train_batch_size=per_device_bs,
         per_device_eval_batch_size=config.get('per_device_eval_batch_size', 2),
-        gradient_accumulation_steps=config.get('gradient_accumulation_steps', 8),
+        gradient_accumulation_steps=grad_accum,
         learning_rate=config.get('learning_rate', 3e-5),
-        warmup_ratio=config.get('warmup_ratio', 0.1),
+        warmup_steps=warmup_steps,
         weight_decay=config.get('weight_decay', 0.01),
         fp16=config.get('fp16', True),
         eval_strategy=config.get('eval_strategy', config.get('evaluation_strategy', 'steps')),

@@ -8,7 +8,8 @@ during training, and tokenizes for LED input format:
 """
 
 import json
-from typing import Dict, List
+import warnings
+from typing import Dict, List, Optional
 
 import torch
 from torch.utils.data import Dataset
@@ -28,7 +29,7 @@ class LEDCorrectionDataset(Dataset):
         self,
         jsonl_path: str,
         tokenizer: AutoTokenizer,
-        drug_dictionary: DrugDictionary,
+        drug_dictionary: Optional[DrugDictionary] = None,
         max_input_length: int = 8192,
         max_target_length: int = 2048,
         corruption_rate: float = 0.3,
@@ -43,12 +44,17 @@ class LEDCorrectionDataset(Dataset):
         # Load records
         self.records = self._load_jsonl(jsonl_path)
 
-        # Error synthesizer (only applied during training)
-        self.synthesizer = ClinicalErrorSynthesizer(
-            drug_dictionary=drug_dictionary,
-            corruption_rate=corruption_rate if is_train else 0.0,
-            seed=seed,
-        )
+        # Error synthesizer — only built when drug_dictionary is supplied.
+        # With the static preprocessing pipeline, drug_dict=None and the
+        # synthesizer is never called (pre-baked keys take priority).
+        if drug_dictionary is not None:
+            self.synthesizer = ClinicalErrorSynthesizer(
+                drug_dictionary=drug_dictionary,
+                corruption_rate=corruption_rate if is_train else 0.0,
+                seed=seed,
+            )
+        else:
+            self.synthesizer = None
 
         print(f"[Dataset] Loaded {len(self.records)} records from {jsonl_path} "
               f"(train={is_train}, corruption_rate={corruption_rate if is_train else 0.0})")
@@ -70,16 +76,24 @@ class LEDCorrectionDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         record = self.records[idx]
         source_note = record.get('input', '')
-        # Priority 1: Use pre-applied corruption from preprocessing
+        # Priority 1: Use pre-applied corruption from preprocessing (static pipeline)
         if 'corrupted_summary' in record and 'true_summary' in record:
             corrupted_summary = record['corrupted_summary']
             true_summary = record['true_summary']
         else:
-            # Priority 2: Fallback to on-the-fly corruption (legacy/development)
-            source_note = record.get('input', '')
+            # Priority 2: On-the-fly synthesis (legacy / dev mode)
             true_summary = record.get('target', '')
-            result = self.synthesizer.corrupt(true_summary, source_note)
-            corrupted_summary = result.corrupted_summary
+            if self.synthesizer is not None:
+                result = self.synthesizer.corrupt(true_summary, source_note)
+                corrupted_summary = result.corrupted_summary
+            else:
+                # No synthesizer and no pre-baked keys — use clean text as-is
+                warnings.warn(
+                    f"Record at idx={idx} missing 'corrupted_summary' but "
+                    "drug_dictionary=None. Using clean summary as input.",
+                    RuntimeWarning, stacklevel=2,
+                )
+                corrupted_summary = true_summary
 
         # Build input: [corrupted_summary] </s> [source_note]
         input_text = corrupted_summary + " </s> " + source_note
