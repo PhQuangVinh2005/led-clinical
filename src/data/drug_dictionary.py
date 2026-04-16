@@ -6,7 +6,6 @@ functionality for medication name swaps during synthetic error generation.
 """
 
 import random
-from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import pyarrow.parquet as pq

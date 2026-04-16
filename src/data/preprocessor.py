@@ -7,7 +7,6 @@ import csv
 import json
 import os
 import random
-from pathlib import Path
 from typing import Dict, List, Set, Tuple
 from tqdm import tqdm
 
@@ -162,6 +161,10 @@ def preprocess(
 
     # 3. Apply target filter
     records = apply_target_filter(records, min_target_tokens, max_target_tokens)
+
+    # 4. Stratified split
+    print("[Preprocessor] Performing stratified split 80/10/10:")
+    train, val, test = stratified_split(records, seed=seed)
 
     # 5. Initialize Synthesizer
     print(f"[Preprocessor] Initializing synth (rate={corruption_rate})...")

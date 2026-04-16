@@ -5,7 +5,6 @@ Provides ROUGE and per-error-type correction rate metrics.
 """
 
 import evaluate
-import numpy as np
 from typing import Dict, List
 
 

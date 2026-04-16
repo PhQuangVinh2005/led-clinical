@@ -15,15 +15,12 @@ import os
 import sys
 import json
 from pathlib import Path
-from typing import List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data.drug_dictionary import DrugDictionary
 from src.data.error_synthesizer import ClinicalErrorSynthesizer
-from src.data.dataset import LEDCorrectionDataset
-from transformers import AutoTokenizer
 
 
 def print_colored_diff(original: str, corrupted: str):
@@ -85,7 +82,7 @@ def main():
 
     # 3. Setup Tokenizer for input string check
     print(f"Loading tokenizer: {args.model}")
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    # tokenizer = AutoTokenizer.from_pretrained(args.model) # Unused for now
 
     # 4. Process samples
     print(f"\n--- Showing {args.num_samples} samples from {args.file} ---")
@@ -104,7 +101,7 @@ def main():
             if is_pre_corrupted:
                 source_note = record['input']
                 true_summary = record['true_summary']
-                corrupted_summary = record['corrupted_summary']
+                # corrupted_summary = record['corrupted_summary'] # Unused for now
                 # We can't see details for pre-baked errors unless we check the log file,
                 # but for this diagnostic we can re-run synth on the true summary to see logic
                 result = synth.corrupt(true_summary, source_note)
@@ -126,7 +123,7 @@ def main():
             
             print_colored_diff(true_summary, result.corrupted_summary)
             
-            print(f"\n[ERROR DETAILS]:")
+            print("\n[ERROR DETAILS]:")
             for detail in result.error_details:
                 e_type = detail.get('type')
                 orig = detail.get('original')
@@ -136,7 +133,7 @@ def main():
             
             # Show LED input string (first 200 chars)
             input_str = result.corrupted_summary + " </s> " + source_note
-            print(f"\n[LED INPUT PREFIX (first 200 chars)]:")
+            print("\n[LED INPUT PREFIX (first 200 chars)]:")
             print(f"{input_str[:200]}...")
             
             samples_shown += 1

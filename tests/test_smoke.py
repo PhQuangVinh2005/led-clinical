@@ -9,10 +9,7 @@ Marked with @pytest.mark.smoke so they can be run selectively:
     pytest -m smoke
 """
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import torch

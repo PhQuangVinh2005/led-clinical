@@ -9,8 +9,6 @@ import pytest
 from src.data.error_synthesizer import (
     ClinicalErrorSynthesizer,
     CorruptionResult,
-    DOSAGE_PATTERN,
-    WORD_TO_NUM,
 )
 
 

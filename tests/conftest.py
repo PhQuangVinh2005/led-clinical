@@ -5,10 +5,7 @@ The key challenge: DrugDictionary normally loads data/raw/drug-dictionary/heh.pa
 We mock that out so unit tests run in CI without the 200MB file.
 """
 import json
-import os
-import tempfile
 from typing import Dict, List, Optional, Set
-from unittest.mock import MagicMock, patch
 
 import pytest
 

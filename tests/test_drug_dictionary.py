@@ -5,7 +5,6 @@ Because DrugDictionary.__init__ calls pq.read_table(), we test
 via the StubDrugDictionary fixture from conftest.py which exposes
 the exact same public API without any I/O.
 """
-import pytest
 
 
 # ──────────────────────────────────────────────────────────────
