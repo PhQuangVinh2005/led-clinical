@@ -28,6 +28,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     TrainerCallback,
+    default_data_collator,
 )
 from transformers.trainer_utils import get_last_checkpoint
 
@@ -183,12 +184,18 @@ def main():
     )
 
     # Create trainer
+    # ── Important: pass data_collator explicitly to prevent Seq2SeqTrainer from ──
+    # auto-creating DataCollatorForSeq2Seq when processing_class is provided.
+    # DataCollatorForSeq2Seq calls tokenizer.pad() on our already-padded tensors
+    # and doesn't handle the LED-specific 'global_attention_mask' key cleanly,
+    # potentially corrupting tensor values (causing the CUDA gather OOB crash).
+    # default_data_collator does the right thing: it just stacks same-shape tensors.
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        processing_class=tokenizer,
+        data_collator=default_data_collator,  # bypass DataCollatorForSeq2Seq
         callbacks=[GPUMemoryCallback(log_every_n_steps=500)],
     )
 
