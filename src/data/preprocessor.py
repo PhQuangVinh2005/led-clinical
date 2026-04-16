@@ -9,6 +9,7 @@ import os
 import random
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
+from tqdm import tqdm
 
 
 def load_held_out_ids(held_out_path: str) -> Set[str]:
@@ -34,7 +35,9 @@ def load_mimic_csv(csv_path: str, held_out_ids: Set[str]) -> List[Dict]:
 
     with open(csv_path, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        for row in reader:
+        # Use a list for tqdm to get a progress bar if we know the size, 
+        # but since it's a reader, we'll just wrap it.
+        for row in tqdm(reader, desc="Loading CSV"):
             note_id = row['note_id']
             if note_id in held_out_ids:
                 excluded += 1
@@ -132,7 +135,7 @@ def save_jsonl(records: List[Dict], output_path: str) -> None:
     """Save records as JSONL file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
-        for r in records:
+        for r in tqdm(records, desc=f"Saving {os.path.basename(output_path)}"):
             f.write(json.dumps(r, ensure_ascii=False) + '\n')
     print(f"[Preprocessor] Saved {len(records)} records to {output_path}")
 
