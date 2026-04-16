@@ -220,6 +220,7 @@ class ClinicalErrorSynthesizer:
 
         # Use a lambda for the replacement to treat 'substitute' as a literal string.
         # This prevents re.sub from interpreting backslashes as escape sequences.
+        pattern = re.compile(re.escape(target_drug), re.IGNORECASE)
         corrupted = pattern.sub(lambda _: substitute, summary, count=1)
 
         return corrupted, {
